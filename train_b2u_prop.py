@@ -53,7 +53,7 @@ parser.add_argument("--Lambda1", type=float, default=1.0)
 parser.add_argument("--Lambda2", type=float, default=2.0)
 parser.add_argument("--increase_ratio", type=float, default=20.0)
 
-opt, _ = parser.parse_known_args()  # コマンドライン引数をパースした結果を保持するオブジェクト
+opt, _ = parser.parse_known_args()
 systime = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')
 operation_seed_counter = 0
 os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_devices
@@ -90,13 +90,13 @@ def save_network(network, epoch, name):
 
 
 def load_network(load_path, network, strict=True):
-    assert load_path is not None   # load_pathがNoneの場合AssertionErrorが発生し、プログラムが即座に停止
+    assert load_path is not None
     logger.info("Loading model from [{:s}] ...".format(load_path))
     if isinstance(network, nn.DataParallel) or isinstance(
         network, nn.parallel.DistributedDataParallel
     ):
         network = network.module
-    load_net = torch.load(load_path)  # モデルのパラメータを読み込む
+    load_net = torch.load(load_path)
     load_net_clean = OrderedDict()  # remove unnecessary 'module.'
     for k, v in load_net.items():
         if k.startswith("module."):
@@ -146,7 +146,7 @@ def get_generator():
 class AugmentNoise(object):
     def __init__(self, style):
         print(style)
-        if style.startswith('gauss'):  # .startswith(prefix)：文字列がprefixで指定されたフレーズで始まっていればTrue、そうでなければFalseを返す
+        if style.startswith('gauss'):
             self.params = [
                 float(p) / 255.0 for p in style.replace('gauss', '').split('_')
             ]
@@ -167,8 +167,7 @@ class AugmentNoise(object):
         shape = x.shape
         if self.style == "gauss_fix":
             std = self.params[0]
-            # 以下の処理によりバッチごとに異なる標準偏差を持つガウスノイズを適用できるようになる
-            std = std * torch.ones((shape[0], 1, 1, 1), device=x.device) # バッチサイズごとの標準偏差テンソルを作成
+            std = std * torch.ones((shape[0], 1, 1, 1), device=x.device)
             noise = torch.cuda.FloatTensor(shape, device=x.device)
             torch.normal(mean=0.0,
                          std=std,
@@ -243,22 +242,9 @@ def generate_mask(img, width=4, mask_type='random'):
     mask = torch.zeros(size=(n * h // width * w // width * width**2, ),
                        dtype=torch.int64,
                        device=img.device)
-    """
-    h // width: 画像をwidth×widthのブロックに分割した時の高さ方向のブロック数
-    w // width: 画像をwidth×widthのブロックに分割した時の幅方向のブロック数
-    h // width * w // width: 画像全体のブロック数（何個のwidth×widthブロックができるか）
-    h // width * w // width * width**2: 全ブロックの全ピクセル数（1つのブロックにwidth×width個のピクセルがある）
-    n * h // width * w // width * width**2: バッチサイズを考慮した全ピクセル数
-
-    論文の図2にあるように、width=4で4×4のブロック
-    すなわち、バッチサイズを考慮した全ピクセル数を長さとした1次元テンソルを作成（0埋め）
-    """
-
-    # width=4のとき、0から16、間隔は1の数値が並ぶ1次元テンソル
     # idx_list = torch.tensor([0, 1, 2, ..., 15])
-    idx_list = torch.arange(  # torch.arange：指定した範囲で等間隔の数値を持つ1次元テンソルを作成する関数
+    idx_list = torch.arange(
         0, width**2, 1, dtype=torch.int64, device=img.device)
-    # バッチサイズを考慮した全ブロック数を長さとした1次元テンソルを作成（0埋め）
     rd_idx = torch.zeros(size=(n * h // width * w // width, ),
                          dtype=torch.int64,
                          device=img.device)
@@ -266,24 +252,22 @@ def generate_mask(img, width=4, mask_type='random'):
     if mask_type == 'random':
         torch.randint(low=0,
                       high=len(idx_list),  # =16
-                      size=(n * h // width * w // width, ),  # バッチサイズを考慮した全ブロック数
+                      size=(n * h // width * w // width, ),
                       device=img.device,
                       generator=get_generator(device=img.device),
-                      out=rd_idx)  # outは出力テンソル、つまり乱数の生成結果をrd_idxに直接書き込む
+                      out=rd_idx)
     elif mask_type == 'batch':
         rd_idx = torch.randint(low=0,
                                high=len(idx_list),
                                size=(n, ),  # バッチサイズ
                                device=img.device,
                                # tensor.repeat(size): テンソルの要素を複製して新しいサイズのテンソルを作成、sizeは各次元での繰り返し回数を指定する整数のタプル
-                               # この場合、バッチサイズnのテンソルを h // width * w // width 回繰り返す
                                generator=get_generator(device=img.device)).repeat(h // width * w // width)
     elif mask_type == 'all':
         rd_idx = torch.randint(low=0,
                                high=len(idx_list),
                                size=(1, ),
                                device=img.device,
-                               # サイズ1のテンソルを n * h // width * w // width 回繰り返す
                                generator=get_generator(device=img.device)).repeat(n * h // width * w // width)
     elif 'fix' in mask_type:
         index = mask_type.split('_')[-1]  # アンダースコア (_) で分割し、最後の要素を取得
@@ -297,22 +281,8 @@ def generate_mask(img, width=4, mask_type='random'):
                                 step=width**2,  # 1ブロックごとのステップ
                                 dtype=torch.int64,
                                 device=img.device)
-
-    """
-    rd_pair_idxは画像の4×4ブロック内のピクセル番号を表しており、0から15の範囲にある。
-    しかし、このままでは画像全体のピクセル位置には対応していない。
-    そこで、torch.arange()によって、ブロックごとの開始位置（オフセット）を計算し、それをrd_pair_idxに加えることで、画像全体の座標へとマッピングする
-    """
-
-    # ランダムに選ばれたピクセルだけをマスクする2次元マスクを作成（まだ1次元）
-    # ランダムに選ばれたピクセルだけを1に、他は0
+    
     mask[rd_pair_idx] = 1
-
-    """
-    1. 1次元のマスクを4次元にreshape
-    2. permuteで軸を並べ替え
-    3. 型をint64に戻す
-    """
     mask = depth_to_space(mask.type_as(img).view(
         n, h // width, w // width, width**2).permute(0, 3, 1, 2), block_size=width).type(torch.int64)
 
@@ -321,16 +291,10 @@ def generate_mask(img, width=4, mask_type='random'):
 
 def interpolate_mask(tensor, mask, mask_inv):
     n, c, h, w = tensor.shape
-    device = tensor.device  # "cuda:0"のようなtorch.device型のオブジェクトが入る
+    device = tensor.device
     mask = mask.to(device)
 
-    # 形状(3,3)のカーネルの作成
     kernel = np.array([[0.5, 1.0, 0.5], [1.0, 0.0, 1.0], (0.5, 1.0, 0.5)])
-
-    """
-    np.newaxisを使うと次元を増やすことができる
-    この場合、(3,3)のnumpy arrayが[np.newaxis, np.newaxis, :, :]によって、(1,1,3,3)となる
-    """
     kernel = kernel[np.newaxis, np.newaxis, :, :]
 
     # kernelをtensorに変換、kernelを正規化
@@ -345,12 +309,8 @@ def interpolate_mask(tensor, mask, mask_inv):
         padding=1
     )
 
-    """
-    view_as(tensor): tensorと同じ形にリシェイプ(view)するPyTorchの関数
-    """
     return filtered_tensor.view_as(tensor) * mask + tensor * mask_inv
 
-### Global MaskerとGlobal Mask Mapperの処理？ ###
 class Masker(object):
     def __init__(self, width=4, mode='interpolate', mask_type='all'):
         self.width = width
@@ -365,22 +325,19 @@ class Masker(object):
             mask_type = self.mask_type
 
         n, c, h, w = img.shape
-        # 画像をwidth×width(4x4)のブロックに分けて、ブロック内のピクセルをランダムにマスクする
-        mask = generate_mask(img, width=self.width, mask_type=mask_type)  # ランダムに選ばれた部分だけ1のマスク
-        mask_inv = torch.ones(mask.shape).to(img.device) - mask   # マスク部分だけ引いて、他が1として残る
+        mask = generate_mask(img, width=self.width, mask_type=mask_type)
+        mask_inv = torch.ones(mask.shape).to(img.device) - mask
         if mode == 'interpolate':
             masked = interpolate_mask(img, mask, mask_inv)
         else:
             raise NotImplementedError
 
-        net_input = masked  # マスク画像をちょっといじってるっぽいけどよくわからない
+        net_input = masked
         return net_input, mask
 
     def train(self, img):
-        n, c, h, w = img.shape  # n:バッチサイズ、c:チャンネル数、h:高さ、w:横
-        # 形状(n, self.width**2, c, h, w)の5次元の0埋めされたテンソルを作成し、imgテンソルと同じデバイスに配置する
+        n, c, h, w = img.shape  
         tensors = torch.zeros((n, self.width**2, c, h, w), device=img.device)
-        # 形状(n, self.width**2, 1, h, w)の5次元の0埋めされたテンソルを作成
         masks = torch.zeros((n, self.width**2, 1, h, w), device=img.device)
         for i in range(self.width**2):
             x, mask = self.mask(img, mask_type='fix_{}'.format(i))
@@ -460,10 +417,9 @@ def get_SIDD_validation(dataset_dir):
     num_img, num_block, _, _ = val_data_gt.shape
     return num_img, num_block, val_data_noisy, val_data_gt
 
-# coco2017をPILで開いて、numpyに変換して計算しやすくする
 def validation_coco(dataset_dir):
-    fns = glob.glob(os.path.join(dataset_dir, "*"))  # glob.glob(): 条件を満たすパスの文字列を要素とするリストを取得
-    fns.sort()    # 取得したファイルのリストを昇順（アルファベット順）にソート
+    fns = glob.glob(os.path.join(dataset_dir, "*"))
+    fns.sort()
     images = []
     for fn in fns:
         im = Image.open(fn)
@@ -473,8 +429,8 @@ def validation_coco(dataset_dir):
 
 # kodakをPILで開いて、numpyに変換して計算しやすくする
 def validation_kodak(dataset_dir):
-    fns = glob.glob(os.path.join(dataset_dir, "*"))  # glob.glob(): 条件を満たすパスの文字列を要素とするリストを取得
-    fns.sort()    # 取得したファイルのリストを昇順（アルファベット順）にソート
+    fns = glob.glob(os.path.join(dataset_dir, "*"))
+    fns.sort()
     images = []
     for fn in fns:
         im = Image.open(fn)
@@ -655,44 +611,41 @@ increase_ratio = opt.increase_ratio
 for epoch in range(epoch_init, opt.n_epoch + 1):
     cnt = 0
 
+    loss_LCNN_sum = []
+    loss_TV_sum   = []
+    loss_reg_sum  = []
+    loss_rev_sum  = []
+    loss_all_sum  = []
+
     for param_group in optimizer.param_groups:
         current_lr = param_group['lr']
     print("LearningRate of Epoch {} = {}".format(epoch, current_lr))
 
     network.train()
 
-    # バッチサイズ個数分の画像データを取り出して、バッチごとに処理
-    # trainフェーズ
     for iteration, clean in enumerate(TrainingLoader):
         st = time.time()
 
-        # クリーン画像とノイズ画像の用意(cleanには1バッチ分の画像が入っている)
-        clean = clean / 255.0  # クリーンな画像を正規化
+        clean = clean / 255.0
         clean = clean.cuda()
-        noisy = noise_adder.add_train_noise(clean)  # ノイズ画像を作成
+        noisy = noise_adder.add_train_noise(clean)
 
         optimizer.zero_grad()
-
-        # masker.train()にnoisyを入れることで4枚のマスク画像が生成される？
 
         # masker.train(): Global Masker、net_input: 図のΩ_y、mask: Global Mask Mapper  つまり、net_inputはマスク付きノイズ画像、maskはそのままマスク
         net_input, mask = masker.train(noisy)  
 
-        # U-Netにマスク付きノイズ画像を入れる
         noisy_output = network(net_input)
 
         n, c, h, w = noisy.shape
 
-        # 予測したノイズにmask適用、reshapeしてdim=1で総和を取る？これ何をしている？
         noisy_output = (noisy_output*mask).view(n, -1, c, h, w).sum(dim=1)
-        diff = noisy_output - noisy  # 図のh(f_θ(Ω_y)) # 予測されたノイズ成分 - ノイズ画像？（負になるのでは？）
+        diff = noisy_output - noisy  
 
-        # ノイズ画像yをノイズ除去ネットワークに入れてf_θ(y)を生成
         with torch.no_grad():
             exp_output = network(noisy)
         exp_diff = exp_output - noisy  # 図のf_θ(y)
 
-        # lossの係数を算出
         # g25, p30: 1_1-2; frange-10
         # g5-50 | p5-50 | raw; 1_1-2; range-10
         Lambda = epoch / opt.n_epoch
@@ -718,15 +671,35 @@ for epoch in range(epoch_init, opt.n_epoch + 1):
         loss_rev = torch.mean(revisible**2)   # revisible lossの計算
         loss_all = loss_reg + loss_rev + lambda_TV*loss_TV + lambda_LCNN*loss_LCNN
 
-        # 元の正則化項をなくして、LCNN LossとTV Lossを入れる → 多少は正則化項同士のコンフリクトが無くなるのでは？
-        #loss_all = loss_rev + lambda_TV*loss_TV + lambda_LCNN*loss_LCNN
-
         loss_all.backward()
         optimizer.step()
         logger.info(
             '{:04d} {:05d} diff={:.6f}, exp_diff={:.6f}, Loss_Reg={:.6f}, Lambda={}, Loss_Rev={:.6f}, Loss_LCNN={:.6f}, Loss_TV={:.6f}, Loss_All={:.6f}, Time={:.4f}'
             .format(epoch, iteration, torch.mean(diff**2).item(), torch.mean(exp_diff**2).item(),
                     loss_reg.item(), Lambda, loss_rev.item(), loss_LCNN.item(), loss_TV.item(), loss_all.item(), time.time() - st))
+
+        loss_LCNN_sum.append(loss_LCNN)
+        loss_TV_sum.append(loss_TV)
+        loss_reg_sum.append(loss_reg)
+        loss_rev_sum.append(loss_rev)
+        loss_all_sum.append(loss_all)
+
+    loss_LCNN_sum = np.array(loss_LCNN_sum)
+    loss_TV_sum   = np.array(loss_TV_sum)
+    loss_reg_sum  = np.array(loss_reg_sum)
+    loss_rev_sum  = np.array(loss_rev_sum)
+    loss_all_sum  = np.array(loss_all_sum)
+
+    loss_LCNN_avg = np.mean(loss_LCNN_sum)
+    loss_TV_avg   = np.mean(loss_TV_sum)
+    loss_reg_avg  = np.mean(loss_reg_sum)
+    loss_rev_avg  = np.mean(loss_rev_sum)
+    loss_all_avg  = np.mean(loss_all_sum)
+
+    log_loss_path = os.path.join(validation_path, "A_log_loss_{}.csv".format(valid_name))
+
+    with open(log_loss_path, "a") as f:
+        f.writelines("{},{},{},{},{},{}\n".format(epoch, loss_all_avg, loss_reg_avg, loss_rev_avg, loss_LCNN_avg, loss_TV_avg))
 
     scheduler.step()
 
@@ -783,14 +756,11 @@ for epoch in range(epoch_init, opt.n_epoch + 1):
                         [[0, val_size - H], [0, val_size - W], [0, 0]],
                         'reflect')
                     
-                    # 画像をTensor型に変換
                     transformer = transforms.Compose([
                         transforms.ToTensor(),
                     ])
                     noisy_im = transformer(noisy_im)
 
-                    # torch.unsqueeze(input, dim): inputに操作を行いたいテンソルを指定、dimに新しく挿入したい次元のインデックスを指定
-                    # 挿入された次元のサイズは1になる
                     noisy_im = torch.unsqueeze(noisy_im, 0)
                     noisy_im = noisy_im.cuda()
 
@@ -808,7 +778,7 @@ for epoch in range(epoch_init, opt.n_epoch + 1):
                         exp_output = network(noisy_im)  # f_θ(y)？
                     pred_dn = dn_output[:, :, :H, :W]
                     pred_exp = exp_output.detach().clone()[:, :, :H, :W]
-                    pred_mid = (pred_dn + beta*pred_exp) / (1 + beta)  # 図の一番最後の画像
+                    pred_mid = (pred_dn + beta*pred_exp) / (1 + beta) 
 
                     # Release gpu memory
                     del exp_output
